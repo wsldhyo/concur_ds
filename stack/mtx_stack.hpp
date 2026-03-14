@@ -8,21 +8,26 @@
 template <typename T>
 class MtxStack : protected NonCopyable, protected NonMovable {
 public:
-  MtxStack() {}
+  MtxStack() = default;
+  ~MtxStack() = default;
 
   template <typename U> void push(U &&val) {
-    LOCK_GUARD(mutex_)
-    stack_.push(std::forward<U>(val));
+    {
+      LOCK_GUARD(mutex_)
+      stack_.push(std::forward<U>(val));
+    }
     cond_.notify_one();
   }
 
   bool pop(T &val) {
-    LOCK_GUARD(mutex_)
-    if (stack_.empty()) {
-      return false;
+    {
+      LOCK_GUARD(mutex_)
+      if (stack_.empty()) {  // 注意判空 
+        return false;
+      }
+      val = std::move(stack_.top()); // move减少拷贝
+      stack_.pop();
     }
-    val = std::move(stack_.top());
-    stack_.pop();
     return true;
   }
 
@@ -30,21 +35,9 @@ public:
     {
       std::unique_lock<std::mutex> lock(mutex_);
       cond_.wait(lock, [this]() { return !stack_.empty(); });
-      val = std::move(stack_.top());
+      val = std::move(stack_.top()); // move减少拷贝
       stack_.pop();
     }
-  }
-
-  bool try_pop(T &val) {
-    {
-      std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
-      if (!lock.owns_lock() || stack_.empty()) { // 不用empty()，会递归上锁
-        return false;
-      }
-      val = std::move(stack_.top());
-      stack_.pop();
-    }
-    return true;
   }
 
   std::size_t size() const {
